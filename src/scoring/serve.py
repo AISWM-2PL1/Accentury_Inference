@@ -202,9 +202,11 @@ class Track1Scorer:
                 transcript = script
             else:
                 transcript = self.stt(x)
-        stage["stt"] = time.time() - t
+        stage["transcribe"] = time.time() - t
         # 게이트 (S0 · §4-2 · §4-3)
+        t = time.time()
         A = align_transcript(script, transcript)
+        stage["gate"] = time.time() - t
         gate = {"transcript": transcript, "gateRatio": round(A.gate_ratio, 3), "blankWordRatio": round(A.blank_word_ratio, 3)}
         if not A.passed:
             return self._fail("gate", False, stage, t_all, detail="대본과 다른 내용", **gate)
@@ -214,18 +216,20 @@ class Track1Scorer:
         t = time.time()
         with tempfile.TemporaryDirectory(prefix="track1-") as td:
             tg = mfa_align_single(Path(wav) if sr == SR and not isinstance(wav, np.ndarray) else self._tmp_wav(x, td), transcript, Path(td))
-            stage["mfa"] = time.time() - t
+            stage["align"] = time.time() - t
             if tg is None:
                 return self._fail("mfa", False, stage, t_all, detail="정렬 실패: " + getattr(mfa_align_single, "last_error", ""), **gate)
             words_phones = read_textgrid(tg)
         # 추출 · 채점
         t = time.time()
         u = extract_utterance(x, SR, words_phones, transcript, script, utt_id=Path(str(wav)).stem)
+        stage["f0"] = time.time() - t
         if u.get("unscorable"):
             code = "f0" if str(u["unscorable"]).startswith("S2") else "mfa"
             return self._fail(code, code == "f0", stage, t_all, detail=u["unscorable"], **gate)
+        t = time.time()
         res = score_extracted(u, self.ref(script_key))
-        stage["score"] = time.time() - t
+        stage["scoring"] = time.time() - t
         if res["score"] != res["score"]:
             return self._fail("blank", False, stage, t_all, detail="두 축 모두 결측", **gate)
         # 신뢰도 【휴리스틱 · 미검증】: 측정된 어절 비율 × (한 축 결측이면 0.5)
@@ -284,7 +288,7 @@ def main() -> int:
     if a.bench:
         runs = [sc.score(a.wav, a.script_key, a.transcript, with_feedback=False) for _ in range(a.bench)]
         ms = [r["processingMs"] for r in runs]
-        stages = {k: [r["detail"]["stageMs"].get(k, 0) for r in runs] for k in ("stt", "mfa", "score")}
+        stages = {k: [r["detail"]["stageMs"].get(k, 0) for r in runs] for k in ("transcribe", "gate", "align", "f0", "scoring")}
         import resource
         rss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / (1024 ** 2 if sys.platform == "darwin" else 1024)
         print(json.dumps({"bench": {"n": a.bench, "load_s": round(load_s, 1), "total_ms_p50": st.median(ms), "total_ms_max": max(ms),

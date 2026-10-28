@@ -82,7 +82,7 @@ def main() -> int:
     tot = [r["totalMs"] for r in res if "totalMs" in r]
     tot_ok = [r["totalMs"] for r in ok]          # 실패 건(게이트·길이·예외)을 섞지 않은 합계 — 코덱스 2026-09-08 #6
     stages = {}
-    for k in ("stt", "mfa", "score"):
+    for k in ("transcribe", "gate", "align", "f0", "scoring"):
         v = [r["stageMs"].get(k) for r in ok if r.get("stageMs", {}).get(k) is not None]
         if v:
             stages[k] = {"p50": pct(v, .5), "p95": pct(v, .95), "max": max(v)}
