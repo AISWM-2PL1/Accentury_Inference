@@ -16,7 +16,7 @@ Accentury 사투리 억양 채점 모델의 추론 코드입니다. 발화 음�
 | 경로 | 내용 |
 | --- | --- |
 | `src/scoring/serve.py` | 진입점. 위 흐름을 함수 하나로 묶어 결과 JSON을 냅니다. |
-| `src/scoring/mfa_one.py` | MFA `align_one`으로 발화 하나를 정렬합니다. |
+| `src/scoring/mfa_one.py` | MFA `align_one`으로 발화 하나를 정렬합니다. 상주 모드에서는 한 번 떠서 요청마다 정렬을 맡습니다. |
 | `src/scoring/align.py`, `extract.py` | 정렬 결과 읽기와 특징 추출. |
 | `src/scoring/reference.py`, `distance.py`, `score.py` | 참조 분포, 거리 계산, 점수와 피드백. |
 | `src/scoring/bench_server.py` | 단계별 소요 시간 측정. |

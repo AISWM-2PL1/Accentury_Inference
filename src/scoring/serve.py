@@ -27,13 +27,17 @@ AUDIO_FORMAT_UNSUPPORTED, ANALYSIS_MISREAD} · `retryable` bool. `modelVersion` 
 from __future__ import annotations
 
 import argparse
+import atexit
 import json
 import os
+import select
 import shutil
+import signal
 import statistics as st
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from pathlib import Path
 
@@ -89,8 +93,203 @@ def _align_one(lab: Path, aligned: Path) -> tuple[Path | None, str]:
     return (out if r.returncode == 0 and out.exists() else None), ((r.stderr or r.stdout) or "")[-400:]
 
 
+class _ResidentMFA:
+    """`mfa_one.py --serve` 를 한 번 띄워 두고 발화마다 한 줄 JSON 으로 정렬을 맡긴다 (KAN-296).
+
+    요청마다 MFA 파이썬을 새로 띄우던 `_align_one` 과 같은 함수를 같은 순서로 부르고, 파이썬 기동과 MFA import,
+    토크나이저 생성만 아낀다. 정렬은 상주 프로세스가 요청마다 fork 한 자식에서 한다. 한 프로세스에서 연달아
+    정렬하면 둘째 건부터 결과가 달라지기 때문이다 (`mfa_one.py` 상주 모드 설명). 상주 메모리는 약 0.6 GB 다
+    (KAN-296 사전 측정, 요청마다 뜨던 프로세스와 같은 크기).
+
+    실패하면 그 요청은 호출한 쪽이 한 번짜리 `_align_one` 으로 다시 간다. 그래서 상주 프로세스가 죽거나
+    멈춰도 채점은 이어진다. 다음 요청에서 새로 띄운다.
+
+    - 응답이 `ACCENTURY_MFA_RESIDENT_TIMEOUT` 초(기본 30) 안에 없으면 죽이고 실패로 돌린다.
+    - `ACCENTURY_MFA_RESIDENT_RECYCLE` 건(기본 200)마다 새로 띄운다. 15 건에서 건당 약 2 MB 씩 늘다 둔화했는데
+      멈추는지는 확인하지 못했다 (KAN-296 사전 측정). 다시 띄우는 비용은 오디오 예열(`mfa_one._prewarm_audio`)과 발음 사전 FST
+      (`mfa_one._prebuild_lexicon`)를 더한 뒤 staging 에서 요청 하나가 약 5.9 초 길어질 만큼이었다 (2026-10-28, 같은 음성 비교).
+      그래서 마지막 건을 답한 직전 프로세스를 바로 닫고 새 프로세스는 뒤에서 띄운다(`_prepare_next`). 다음 요청은 정렬
+      직전에 남은 기동 시간만 기다리는데, 그 앞의 Whisper 전사(약 6 초)가 대개 그보다 길다. 두 프로세스가 함께 떠 있는
+      순간은 없다.
+    - 워커와 같은 프로세스 그룹에 남긴다. 어댑터가 취소 때 그룹째 죽이면 함께 거둬진다.
+    """
+
+    def __init__(self) -> None:
+        self.proc: subprocess.Popen | None = None
+        self.jobs = 0
+        self._next: tuple[threading.Thread, dict] | None = None
+        self.timeout = float(os.environ.get("ACCENTURY_MFA_RESIDENT_TIMEOUT", "30"))
+        self.recycle = int(os.environ.get("ACCENTURY_MFA_RESIDENT_RECYCLE", "200"))
+
+    def start(self) -> None:
+        self._take_next()
+        self.close()
+        self.proc = self._spawn()
+        self.jobs = 0
+
+    def _spawn(self) -> subprocess.Popen:
+        """새 상주 프로세스를 띄우고 기동(예열 포함)이 끝날 때까지 기다린다. self 는 건드리지 않는다."""
+        p = subprocess.Popen([f"{MFA_BIN}/python", str(Path(__file__).with_name("mfa_one.py")), "--serve"],
+                             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                             env=_mfa_env(), text=True, encoding="utf-8", bufsize=1)
+        try:
+            res = self._ask({"op": "ping", "dic": str(MFA_DICT), "acoustic": MFA_ACOUSTIC}, max(self.timeout, 60.0), p)
+            if not res.get("ok"):
+                raise RuntimeError(f"상주 MFA 기동 실패: {res.get('error', '')}")
+        except BaseException:
+            _close_proc(p)
+            raise
+        return p
+
+    def _prepare_next(self) -> None:
+        """다음 상주 프로세스를 뒤에서 띄운다. 결과는 `_take_next` 가 거둔다."""
+        box: dict = {}
+
+        def run() -> None:
+            try:
+                box["proc"] = self._spawn()
+            except Exception as e:  # noqa: BLE001 - 실패하면 다음 요청이 직접 띄운다
+                box["error"] = e
+
+        t = threading.Thread(target=run, name="mfa-resident-recycle", daemon=True)
+        t.start()
+        self._next = (t, box)
+
+    def _take_next(self) -> None:
+        """뒤에서 띄우던 프로세스가 있으면 끝날 때까지 기다려 지금 프로세스로 삼는다. 실패했으면 버린다."""
+        if self._next is None:
+            return
+        t, box = self._next
+        self._next = None
+        t.join()
+        p = box.get("proc")
+        if p is not None:
+            self.close()
+            self.proc, self.jobs = p, 0
+
+    def _ask(self, msg: dict, timeout: float, proc: subprocess.Popen | None = None) -> dict:
+        p = proc or self.proc
+        assert p and p.stdin and p.stdout
+        p.stdin.write(json.dumps(msg, ensure_ascii=False) + "\n")
+        p.stdin.flush()
+        ready, _, _ = select.select([p.stdout], [], [], timeout)
+        if not ready:
+            raise TimeoutError(f"상주 MFA 가 {timeout:.0f} 초 안에 답하지 않았다")
+        line = p.stdout.readline()
+        if not line:
+            raise EOFError("상주 MFA 가 응답 없이 끝났다")
+        return json.loads(line)
+
+    def align(self, lab: Path, aligned: Path) -> tuple[Path | None, str, bool]:
+        """(TextGrid 또는 None, 실패 사유, 상주 프로세스가 답했는가).
+
+        답했는데 실패했으면 한 번짜리 `align_one` 도 같은 입력에서 같은 이유로 실패하므로 호출한 쪽은
+        그것을 건너뛰고 `align` 으로 간다 (현행 `align_one` 실패와 같은 길). 답하지 못했으면 한 번짜리로 간다.
+        """
+        aligned.mkdir(parents=True, exist_ok=True)
+        out = aligned / "u.TextGrid"
+        try:
+            self._take_next()
+            if self.proc is None or self.proc.poll() is not None or self.jobs >= self.recycle:
+                self.start()
+            res = self._ask({"op": "align", "wav": str(lab / "u.wav"), "txt": str(lab / "u.txt"),
+                             "dic": str(MFA_DICT), "acoustic": MFA_ACOUSTIC, "out": str(out)}, self.timeout)
+            self.jobs += 1
+        except Exception as e:  # noqa: BLE001 - 어떤 실패든 이 프로세스를 버리고 호출한 쪽이 한 번짜리로 간다
+            self.close()
+            return None, f"{type(e).__name__}: {e}"[-400:], False
+        if self.jobs >= self.recycle:        # 이번 건의 TextGrid 는 이미 나왔다. 다음 요청을 기다리게 하지 않도록 지금 갈아 둔다
+            self.close()
+            self._prepare_next()
+        return (out if res.get("ok") and out.exists() else None), res.get("error", ""), True
+
+    def close(self) -> None:
+        """기다리지 않고 바로 죽인다. 정렬 중이던 자손까지 먼저 죽인다.
+
+        `mfa_one.py` 의 PR_SET_PDEATHSIG 는 직접 fork 한 자식에만 걸리고, 그 자식이 띄운 Kaldi 프로세스에는 이어지지
+        않는다. 그것들이 남으면 호출한 쪽의 한 번짜리 대체 경로와 동시에 돌고, 어댑터가 작업 폴더를 지운 뒤에도 파일을
+        건드린다 (Codex 리뷰 P2). 그래서 자손을 먼저 멈춰 더 퍼지지 못하게 한 뒤 모두 죽이고 나서 상주 프로세스를 죽인다.
+        """
+        p, self.proc = self.proc, None
+        if p is not None:
+            _close_proc(p)
+
+    def shutdown(self) -> None:
+        """뒤에서 띄우던 프로세스까지 거둬 닫는다 (종료 때)."""
+        self._take_next()
+        self.close()
+
+
+def _close_proc(p: subprocess.Popen) -> None:
+    _kill_descendants(p.pid)
+    p.kill()
+    p.wait()
+    for f in (p.stdin, p.stdout):
+        try:
+            f and f.close()
+        except OSError:
+            pass
+
+
+def _descendants(root: int) -> set[int]:
+    """`/proc` 의 부모 관계로 root 의 자손 pid 를 모은다. `/proc` 가 없으면(개발 맥) 빈 집합이다."""
+    children: dict[int, list[int]] = {}
+    for d in os.listdir("/proc") if os.path.isdir("/proc") else []:
+        if not d.isdigit():
+            continue
+        try:
+            with open(f"/proc/{d}/stat", encoding="utf-8", errors="replace") as f:
+                ppid = int(f.read().rsplit(")", 1)[1].split()[1])   # comm 에 공백이나 괄호가 있어도 마지막 ")" 뒤가 필드다
+        except (OSError, IndexError, ValueError):
+            continue
+        children.setdefault(ppid, []).append(int(d))
+    found, stack = set(), [root]
+    while stack:
+        for c in children.get(stack.pop(), []):
+            if c not in found:
+                found.add(c)
+                stack.append(c)
+    return found
+
+
+def _kill_descendants(root: int) -> None:
+    """root 의 자손을 SIGSTOP 으로 얼린 뒤(더 이상 fork 하지 못하게) 다시 모아 SIGKILL 한다."""
+    stopped: set[int] = set()
+    for _ in range(5):                       # 얼리는 사이에 새로 뜬 자손까지 잡는다
+        new = _descendants(root) - stopped
+        if not new:
+            break
+        for pid in new:
+            try:
+                os.kill(pid, signal.SIGSTOP)
+            except ProcessLookupError:
+                pass
+        stopped |= new
+    for pid in stopped:
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+
+
+_RESIDENT = _ResidentMFA()
+atexit.register(_RESIDENT.shutdown)
+MFA_MODES = ("resident", "align_one", "align")
+
+
+def _mfa_mode() -> str:
+    mode = os.environ.get("ACCENTURY_MFA_MODE", "resident")     # 기본 resident (KAN-296). 되돌리기: ACCENTURY_MFA_MODE=align_one
+    if mode not in MFA_MODES:        # 오타나 대소문자가 새 경로를 켜지 않게 (코덱스 2026-09-08 #3)
+        raise ValueError(f"ACCENTURY_MFA_MODE 는 {', '.join(MFA_MODES)} 중 하나여야 한다. 받은 값 {mode!r}")
+    return mode
+
+
 def mfa_align_single(wav: Path, transcript: str, workdir: Path) -> Path | None:
     """발화 하나를 MFA 로 정렬한다. TextGrid 경로 또는 None.
+
+    **KAN-296 이후 기본은 `resident`** 다. `align_one` 과 같은 함수를 상주 프로세스(`_ResidentMFA`)에서 부른다.
+    상주 프로세스가 답하지 못하면 그 요청은 한 번짜리 `align_one` 으로, 정렬이 실패하면 `align` 으로 간다.
+    되돌리기는 `ACCENTURY_MFA_MODE=align_one`(KAN-296 이전 동작). 아래는 KAN-57 때의 설명이다.
 
     **기본은 `align_one`** (KAN-57 채택, 2026-09-08 — 회귀 811 건에서 지역별 분포가 `align` 과 같았다,
     `docs/KAN57_RESULTS_2026-09-07.md` §4). `align_one` 이 실패하면 `align` 으로 한 번 더 간다(그 요청만 17 s).
@@ -120,11 +319,16 @@ def mfa_align_single(wav: Path, transcript: str, workdir: Path) -> Path | None:
     lab.mkdir(parents=True, exist_ok=True)
     shutil.copy(wav, lab / "u.wav"); (lab / "u.txt").write_text(transcript, encoding="utf-8")
 
-    mode = os.environ.get("ACCENTURY_MFA_MODE", "align_one")     # 기본 align_one — KAN-57 채택 (2026-09-08). 되돌리기: ACCENTURY_MFA_MODE=align
-    if mode not in ("align", "align_one"):        # 오타·대소문자가 새 경로를 켜지 않게 — 코덱스 2026-09-08 #3
-        raise ValueError(f"ACCENTURY_MFA_MODE 는 align 또는 align_one — 받은 값 {mode!r}")
+    mode = _mfa_mode()
     errs = []
-    if mode == "align_one":
+    one_shot = mode == "align_one"
+    if mode == "resident":           # KAN-296. 상주 프로세스가 답하지 못했을 때만 한 번짜리 align_one 으로 이어간다
+        tg, err, answered = _RESIDENT.align(lab, aligned / "resident")
+        if tg:
+            return tg
+        errs.append(f"resident: {err}")
+        one_shot = not answered
+    if one_shot:
         tg, err = _align_one(lab, aligned / "one")
         if tg:
             return tg
@@ -157,6 +361,12 @@ class Track1Scorer:
             dev = track2_asr.pick_device(whisper_device)
             self.stt, self.stt_repo, self.stt_dtype, _ = track2_asr.build(dev)
             self.model_version += f"+{Path(self.stt_repo).name}+{self.stt_dtype}"   # dtype 도 버전에 — 코덱스 2026-09-08 #4
+        if _mfa_mode() == "resident":
+            # 기동 때 띄워 import 비용을 워밍업에 넣는다 (KAN-296). 실패해도 첫 요청에서 다시 띄우므로 기동은 막지 않는다
+            try:
+                _RESIDENT.start()
+            except Exception:  # noqa: BLE001
+                _RESIDENT.close()
 
     def ref(self, key: str):
         if key not in self._refs:
