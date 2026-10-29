@@ -1,0 +1,27 @@
+{
+  "version": "V1",
+  "name": "MFA 최적화 원본",
+  "based_on": null,
+  "source_commit": "a6f409668c95ee10e301090c53265e30227ca85a",
+  "image": {
+    "tag_uri": "325771561913.dkr.ecr.ap-northeast-2.amazonaws.com/accentury/inference-releases:base-e6c813c-kan296-0d72c03",
+    "digest_uri": "325771561913.dkr.ecr.ap-northeast-2.amazonaws.com/accentury/inference-releases@sha256:f360ac06f2c7374fc18b5af8c1ce860ba0c668b5d01aab92bec3ff8605884935",
+    "digest": "sha256:f360ac06f2c7374fc18b5af8c1ce860ba0c668b5d01aab92bec3ff8605884935"
+  },
+  "platform": "linux/amd64",
+  "model_code_hash": "0d72c03",
+  "sizes": {
+    "image_id": "sha256:f360ac06f2c7374fc18b5af8c1ce860ba0c668b5d01aab92bec3ff8605884935",
+    "compressed_layer_bytes": 4187440287,
+    "uncompressed_layer_tar_bytes": 7105250816,
+    "regular_file_bytes_deduplicated": 6944956620
+  },
+  "historical_release": {
+    "tag": "v2026.10.29-kan296-0d72c03-slim.1",
+    "commit": "b9445ae51726c4c9a8371283697b88eb3d6ad285",
+    "manifest_path": "releases/v2026.10.29-kan296-0d72c03-slim.1/manifest.json",
+    "url": "https://github.com/AISWM-2PL1/Accentury_Inference/releases/tag/v2026.10.29-kan296-0d72c03-slim.1"
+  },
+  "image_rebuilt_for_folder_reorganization": false,
+  "production_deployed": false
+}

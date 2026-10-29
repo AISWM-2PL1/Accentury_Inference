@@ -27,6 +27,8 @@
 
 다음 명령의 `IMAGE_DIGEST`, `INPUT_DIR`, `OUT_DIR`는 각각 원본 또는 후보의 고정 이미지 주소, 입력 절대경로, 쓰기 가능한 별도 결과 절대경로로 지정한다. 원본·후보 결과 폴더는 분리한다.
 
+저장소 루트에서 먼저 `cd V2`를 실행한 뒤 아래 명령을 사용한다. `$PWD/validation`은 이 버전 폴더 안의 검사 코드 경로다.
+
 ```bash
 docker run --rm --platform linux/amd64 --network none --cpus 4 --memory 7g \
   -e OMP_NUM_THREADS=2 -e MKL_NUM_THREADS=2 \

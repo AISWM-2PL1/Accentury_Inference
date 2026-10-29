@@ -1,4 +1,4 @@
-name: Verify release records
+name: Verify V1 and V2
 on:
   push:
   pull_request:
@@ -9,5 +9,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-      - name: Check source and release consistency
-        run: python3 tools/verify_release.py
+        with:
+          fetch-depth: 0
+      - name: Check version folders and preserved release
+        run: python3 .github/scripts/verify_versions.py

@@ -1,0 +1,8 @@
+# 개발 머신 .venv 실측 핀 (2026-08-30, Python 3.12.13). parselmouth 는 registry/reference/f0_model_lock.json 이 잠근 값 — 바꾸면 참조와 자가 달라진다.
+numpy==2.5.2
+praat-parselmouth==0.4.7
+praatio==6.2.2
+soundfile==0.14.0
+scipy==1.18.0
+torch==2.13.0
+transformers==4.57.6
