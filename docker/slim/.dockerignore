@@ -1,0 +1,5 @@
+*
+!Dockerfile
+!code/
+!code/prune_image.py
+!code/vendor_transformers.py

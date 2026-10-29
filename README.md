@@ -3,6 +3,12 @@
 Accentury 사투리 억양 채점 모델의 추론 코드입니다. 발화 음성(WAV)과 문장 키를 받아 억양 점수와 구간별 피드백을 계산합니다.
 서비스 API는 [Accentury_Server](https://github.com/AISWM-2PL1/Accentury_Server)의 `ai/`가 맡고, 그 어댑터가 `src/scoring/serve.py`의 `Track1Scorer`를 부릅니다.
 
+## 이미지 발행본
+
+현재 게시본은 **[v2026.10.29-kan296-0d72c03-slim.1](releases/v2026.10.29-kan296-0d72c03-slim.1/README.md)**입니다. 유현님의 KAN-296 MFA 상주·예열 최적화 이미지를 기준으로 불필요 파일을 정리했습니다. 압축 전 파일은 6.94 → 6.02GB, 압축 레이어는 4.19 → 3.82GB입니다. 시험한 표본의 처리시간 외 결과는 같았으며 운영 서버 속도는 미검증입니다.
+
+완성 이미지는 기존 비공개 ECR에서 받으며 위 링크에 고정 digest·가져오기·재빌드·검사 방법이 있습니다. 이 저장소에는 빌드 코드와 버전별 근거를 보관합니다. **이미지 게시 완료이며 운영 배포 완료를 뜻하지 않습니다.** [버전 관리 규칙](releases/README.md), [검사 코드](validation/README.md)를 함께 참고하세요.
+
 ## 처리 흐름
 
 1. Whisper로 발화를 전사합니다.

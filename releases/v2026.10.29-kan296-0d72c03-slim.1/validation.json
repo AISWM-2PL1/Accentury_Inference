@@ -1,0 +1,132 @@
+{
+  "measured_on": "2026-10-29",
+  "environment": "Mac arm64 Docker Desktop linux/amd64 emulation; CPU bf16; 2 computation threads",
+  "baseline_digest": "sha256:f360ac06f2c7374fc18b5af8c1ce860ba0c668b5d01aab92bec3ff8605884935",
+  "slim_digest": "sha256:eda0fd1e07c4f04bd6db3726a414313c02ec06e61813ed2a529c2c9b19c278c5",
+  "comparison": {
+    "pass": true,
+    "case_count": 18,
+    "differences": [],
+    "ignored_result_paths": [
+      "result.processingMs",
+      "result.detail.stageMs"
+    ],
+    "ignored_harness_fields": [
+      "seconds",
+      "expectation_failed (validated separately)"
+    ],
+    "baseline_sha256": "c60413556b441724db9963ab7d07a40a96e13413f4b809017926c6b662964d8d",
+    "variant_sha256": "afe1bcc6ecc30dbb0f99089c54e9a3802b0108f353e47ab17f6e86905c10add7",
+    "pip_available": false
+  },
+  "case_design": "실제음성6 + 오류입력4 + align/align_one2 + recycle3 + 강제종료복구1 + 응답실패대체경로1 + 정상복귀1",
+  "preserved": {
+    "service_model_data_sha256_equal_files": 218,
+    "MFA_runtime_pycache_sha256_equal_files": 5259,
+    "image_config": "전체 Config 일치. 추론 Python 3.12의 .pth만 추가해 벤더 경로 등록; MFA Python 3.11 sys.path 원본 동일.",
+    "MFA_default": "resident",
+    "runtime_source_modified": false
+  },
+  "resident": "기본 음성 6건에서 동일 상주 PID/jobs 증가, one-shot/corpus 우회 0회. 재기동/복구/호출 측 강제 대체 후 복귀 확인. 별도 probe에서 비동기로 준비한 프로세스 객체를 그대로 소비함을 확인.",
+  "warmup": "MFA 자체 인터프리터에서 음성 예열·사전 FST 캐시 생성, 음성 예열 LRU 재사용 성공. 예열 실패 메시지 없음.",
+  "http": "원본·경량본 모두 실제 Uvicorn/worker 기동, health UP, 인증 없는 요청401, 음성1건200 OK, 임시파일0, 정상종료. 처리시간 외 응답 동일.",
+  "sizes": {
+    "baseline": {
+      "image_id": "sha256:f360ac06f2c7374fc18b5af8c1ce860ba0c668b5d01aab92bec3ff8605884935",
+      "compressed_layer_bytes": 4187440287,
+      "uncompressed_layer_tar_bytes": 7105250816,
+      "regular_file_bytes_deduplicated": 6944956620
+    },
+    "slim": {
+      "image_id": "sha256:eda0fd1e07c4f04bd6db3726a414313c02ec06e61813ed2a529c2c9b19c278c5",
+      "compressed_layer_bytes": 3823239011,
+      "uncompressed_layer_tar_bytes": 6050234368,
+      "regular_file_bytes_deduplicated": 6017121188
+    }
+  },
+  "folder_groups": [
+    {
+      "group": "Whisper 모델",
+      "before_bytes": 3091519804,
+      "after_bytes": 3091519804,
+      "reduced_bytes": 0
+    },
+    {
+      "group": "MFA 전체",
+      "before_bytes": 2185907038,
+      "after_bytes": 1748772840,
+      "reduced_bytes": 437134198
+    },
+    {
+      "group": "추론 Python 라이브러리",
+      "before_bytes": 1274354454,
+      "after_bytes": 801456301,
+      "reduced_bytes": 472898153
+    },
+    {
+      "group": "참조 데이터",
+      "before_bytes": 152143776,
+      "after_bytes": 152143776,
+      "reduced_bytes": 0
+    },
+    {
+      "group": "서비스 코드",
+      "before_bytes": 1419893,
+      "after_bytes": 1419893,
+      "reduced_bytes": 0
+    },
+    {
+      "group": "기타",
+      "before_bytes": 239611655,
+      "after_bytes": 221808574,
+      "reduced_bytes": 17803081
+    }
+  ],
+  "size_basis": "십진 바이트. 압축 레이어 합·압축 해제 tar(헤더/패딩 포함)·일반 파일 내용 합계를 구분. 폴더 합계는 hardlink 중복을 빼고 MFA env를 cache보다 먼저 집계.",
+  "retained_bootstrap_files": "ensurepip 번들 wheel 약5.2MB는 이번에도 유지. 설치된 pip 패키지와 명령은 양쪽 Python 환경에서 없음.",
+  "limitations": [
+    "Mac amd64 에뮬레이션 표본 검사. 운영 x86 지연·메모리·동시성/장시간 보장은 하지 않음.",
+    "API 시험 제한만 에뮬레이션을 위해300초. 실제 운영 제한 준수를 검증한 것은 아님.",
+    "현재 Whisper/기본 bf16 CPU 경로를 검증. 다른 Transformers 모델/새 어댑터/새 버전은 범위 밖.",
+    "resident 타임아웃은 호출 경계에서 예외를 주입한 검사이며, 실제 지연 및 자손 프로세스 정리 전체를 직접 검증하지 않음.",
+    "사전 캐시 생성 및 비동기 준비 프로세스 소비는 확인했으나 자식 프로세스의 FST 캐시 소비 자체는 직접 계측하지 않음.",
+    "MFA Python 3.11 실행 캐시는 유지했지만, 추론 Python 3.12 pycache 제거에 따른 첫 기동시간 동일성은 보장하지 않음.",
+    "검사 후 동일 이미지에 버전 태그를 붙여 게시한다. 운영 배포와 x86 서버 속도 검증은 별개다."
+  ],
+  "review": {
+    "model": "claude-fable-5-1",
+    "status": "completed",
+    "verdict": "No new P1/P2 defects within the tested scope.",
+    "review_sha256": "1ec1d1d552557fba4735bd4dcdbbf1a4294448349161bdd979c410673e210919"
+  },
+  "raw_evidence_sha256": {
+    "baseline.json": "c60413556b441724db9963ab7d07a40a96e13413f4b809017926c6b662964d8d",
+    "slim.json": "afe1bcc6ecc30dbb0f99089c54e9a3802b0108f353e47ab17f6e86905c10add7",
+    "compare.json": "ce05fe3da6c1bdb2a5407b03cb9f6097c609372b3d176ad86b093324cd499470",
+    "config_comparison.json": "26ee40c1f5013b9c5479ee5c4c5d666bc5497cb20b57bc617b0df6170fa1fb44",
+    "warmup_baseline.json": "dfd9aa1e5ea4e87d489c3186b7bd6fca228c3e96ab6d0f002564ae80c5fae0d1",
+    "warmup_slim.json": "3ad5baaa12f1bf9868c63ed7c4b590e98a8770310862aed319f65c32b28a839e",
+    "background_baseline.json": "08e78ee1601501db64b30c383f3a1871df9f624b807b73ee964ba28e3a38c24b",
+    "background_slim.json": "27882ad05437b8c636ddab8a21e803b7ef7242c2cd625b70e4930ea5f7d53492",
+    "api_baseline.json": "4f86de3e1e65e4d7cab93dc8556fda0fd59d82a29dc23a69d71960002c67c0be",
+    "api_slim.json": "653f240121bcb80d1509abc096c569dc6b570af8cc8335b7aa004899718dee59",
+    "assets_baseline.json": "bcba6f6b639e66cb862c60075b2eb718eec271d076c1c914fe822ce4727b7ba5",
+    "assets_slim.json": "fd1c63674f709502e4c5a5d6edf11cacecc2a9ea63b32257cbbc843cbea0143d",
+    "executed_container_identity.json": "cc40f1ec1828fa01385fcfd00a567ebc564c52846d4fd7c2db288b9c2f87cd74"
+  },
+  "publication_guard_checks": {
+    "local_and_remote_pass": true,
+    "negative_cases_rejected": [
+      "source_modified",
+      "source_added",
+      "base_changed",
+      "evidence_modified",
+      "missing_base_verification",
+      "wrong_archive_tag",
+      "pending_publication",
+      "stale_readme"
+    ],
+    "checked_at": "2026-10-29T12:40:45.144843+00:00",
+    "model_inference_rerun": false
+  }
+}
